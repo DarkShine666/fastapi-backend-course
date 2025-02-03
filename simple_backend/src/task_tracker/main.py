@@ -4,11 +4,9 @@ from typing import List, Dict, Optional
 import requests
 
 # Конфигурация окружения
-JSONBIN_URL = (
-    "https://api.jsonbin.io/v3/b/67a10e4aad19ca34f8f93eb7"  # Замените на ваш Bin ID
-)
+JSONBIN_URL = "https://api.jsonbin.io/v3/b/67a10e4aad19ca34f8f93eb7"
 HEADERS = {
-    "X-Access-Key": "$2a$10$CKC/md8VxneemAk5v1bVMen/t66AErG0wE/4CJqMWzg9uFIXgnvrK",  # Замените на ваш Access Key
+    "X-Access-Key": "$2a$10$CKC/md8VxneemAk5v1bVMen/t66AErG0wE/4CJqMWzg9uFIXgnvrK",
     "Content-Type": "application/json",
 }
 
@@ -41,12 +39,11 @@ class JsonBinStorage:
     def get_all_tasks(self) -> List[Dict]:
         """Получение всех задач из хранилища и обновление last_id"""
         data = self._get_data()
-        # Обновляем last_id на основе количества задач
         if data["tasks"]:
             data["last_id"] = max(task["id"] for task in data["tasks"])
         else:
-            data["last_id"] = 0  # Если задач больше нет, сбрасываем last_id
-        self._put_data(data)  # Обновляем данные в хранилище
+            data["last_id"] = 0
+        self._put_data(data)
         return data.get("tasks", [])
 
     def create_task(self, title: str, status: str) -> Dict:
@@ -80,11 +77,11 @@ class JsonBinStorage:
         for i, task in enumerate(data["tasks"]):
             if task["id"] == task_id:
                 deleted_task = data["tasks"].pop(i)
-                # Обновляем last_id, если удаляем задачу
+
                 if data["tasks"]:
                     data["last_id"] = max(task["id"] for task in data["tasks"])
                 else:
-                    data["last_id"] = 0  # Если задач больше нет, сбрасываем last_id
+                    data["last_id"] = 0
                 self._put_data(data)
                 return deleted_task
         raise ValueError("Task not found")
