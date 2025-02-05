@@ -1,139 +1,234 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict
 import requests
-
-# Конфигурация окружения
-JSONBIN_URL = "https://api.jsonbin.io/v3/b/67a10e4aad19ca34f8f93eb7"
-HEADERS = {
-    "X-Access-Key": "$2a$10$CKC/md8VxneemAk5v1bVMen/t66AErG0wE/4CJqMWzg9uFIXgnvrK",
-    "Content-Type": "application/json",
-}
+import json
+from abc import ABC, abstractmethod
+from enum import Enum
 
 
-class JsonBinStorage:
-    def __init__(self):
-        self._init_storage()
+# --- Общая часть для всех хранилищ --- #
+class StorageType(str, Enum):
+    JSONBIN = "jsonbin"
+    FILE = "file"
 
-    def _init_storage(self):
+
+class TaskBaseModel(BaseModel):
+    title: str
+    status: str
+
+
+class TaskCreate(TaskBaseModel):
+    pass
+
+
+class TaskUpdate(TaskBaseModel):
+    pass
+
+
+class BaseStorage(ABC):
+    @abstractmethod
+    def get_all_tasks(self) -> List[Dict]:
+        """Получение всех задач из хранилища"""
+        pass
+
+    @abstractmethod
+    def create_task(self, task: TaskCreate) -> Dict:
+        """Создание новой задачи"""
+        pass
+
+    @abstractmethod
+    def update_task(self, task_id: int, task: TaskUpdate) -> Dict:
+        """Обновление данных в хранилище"""
+        pass
+
+    @abstractmethod
+    def delete_task(self, task_id: int) -> Dict:
+        """Удаление задачи по ID"""
+        pass
+
+
+# --- Реализация для JSONBin.io --- #
+class JsonBinStorage(BaseStorage):
+    def __init__(self, bin_url: str, api_key: str):
+        self.bin_url = bin_url
+        self.headers = {
+            "X-Access-Key": api_key,
+            "Content-Type": "application/json",
+        }
+        self._initialize()
+
+    def _initialize(self):
         """Инициализация хранилища при первом запуске"""
         try:
-            data = self._get_data()
-            if "tasks" not in data or "last_id" not in data:
-                self._put_data({"tasks": [], "last_id": 0})
-        except requests.exceptions.HTTPError:
-            self._put_data({"tasks": [], "last_id": 0})
+            data = self._load_data()
+            if not data.get("tasks") or not data.get("last_id"):
+                self._save_data({"tasks": [], "last_id": 0})
+        except requests.RequestException:
+            self._save_data({"tasks": [], "last_id": 0})
 
-    def _get_data(self) -> dict:
+    def _load_data(self) -> Dict:
         """Получение данных из хранилища"""
-        response = requests.get(JSONBIN_URL, headers=HEADERS)
+        response = requests.get(self.bin_url, headers=self.headers)
         response.raise_for_status()
         return response.json().get("record", {})
 
-    def _put_data(self, data: dict):
+    def _save_data(self, data: dict):
         """Обновление данных в хранилище"""
-        response = requests.put(JSONBIN_URL, json=data, headers=HEADERS)
+        response = requests.put(self.bin_url, json=data, headers=self.headers)
         response.raise_for_status()
         return response.json()
 
     def get_all_tasks(self) -> List[Dict]:
-        """Получение всех задач из хранилища и обновление last_id"""
-        data = self._get_data()
-        if data["tasks"]:
-            data["last_id"] = max(task["id"] for task in data["tasks"])
-        else:
-            data["last_id"] = 0
-        self._put_data(data)
-        return data.get("tasks", [])
+        """Получение всех задач из хранилища"""
+        return self._load_data().get("tasks", [])
 
-    def create_task(self, title: str, status: str) -> Dict:
+    def create_task(self, task: TaskCreate) -> Dict:
         """Создание новой задачи"""
-        data = self._get_data()
+        data = self._load_data()
         new_id = data["last_id"] + 1
-        new_task = {"id": new_id, "title": title, "status": status}
+        new_task = {"id": new_id, "title": task.title, "status": task.status}
         data["tasks"].append(new_task)
         data["last_id"] = new_id
-        self._put_data(data)
+        self._save_data(data)
         return new_task
 
-    def update_task(
-        self, task_id: int, title: Optional[str], status: Optional[str]
-    ) -> Dict:
-        """Обновление задачи по ID"""
-        data = self._get_data()
-        for task in data["tasks"]:
-            if task["id"] == task_id:
-                if title is not None:
-                    task["title"] = title
-                if status is not None:
-                    task["status"] = status
-                self._put_data(data)
-                return task
-        raise ValueError("Task not found")
+    def update_task(self, task_id: int, task: TaskUpdate) -> Dict:
+        """Обновление данных в хранилище"""
+        data = self._load_data()
+        for t in data["tasks"]:
+            if t["id"] == task_id:
+                t.update(task.dict())
+                self._save_data(data)
+                return t
+        raise ValueError(f"Task {task_id} not found")
 
     def delete_task(self, task_id: int) -> Dict:
         """Удаление задачи по ID"""
-        data = self._get_data()
-        for i, task in enumerate(data["tasks"]):
-            if task["id"] == task_id:
-                deleted_task = data["tasks"].pop(i)
-
-                if data["tasks"]:
-                    data["last_id"] = max(task["id"] for task in data["tasks"])
-                else:
-                    data["last_id"] = 0
-                self._put_data(data)
-                return deleted_task
-        raise ValueError("Task not found")
+        data = self._load_data()
+        for idx, t in enumerate(data["tasks"]):
+            if t["id"] == task_id:
+                deleted = data["tasks"].pop(idx)
+                self._save_data(data)
+                return deleted
+        raise ValueError(f"Task {task_id} not found")
 
 
-# Инициализация хранилища с дефолтными значениями
-storage = JsonBinStorage()
+# --- Реализация для файлового хранилища --- #
+class FileStorage(BaseStorage):
+    def __init__(self, file_path: str = "tasks.json"):
+        self.file_path = file_path
+        self._initialize()
+
+    def _initialize(self):
+        """Инициализация хранилища при первом запуске"""
+        try:
+            self._load_data()
+        except FileNotFoundError:
+            self._save_data({"tasks": [], "last_id": 0})
+
+    def _load_data(self) -> dict:
+        """Загрузка данных из файла"""
+        with open(self.file_path, "r") as f:
+            return json.load(f)
+
+    def _save_data(self, data: dict):
+        """Обновление данных в файле"""
+        with open(self.file_path, "w") as f:
+            json.dump(data, f, indent=2)
+
+    def get_all_tasks(self) -> List[Dict]:
+        """Получение всех задач из хранилища"""
+        return self._load_data().get("tasks", [])
+
+    def create_task(self, task: TaskCreate) -> Dict:
+        """Создание новой задачи"""
+        data = self._load_data()
+        new_id = data["last_id"] + 1
+        new_task = {"id": new_id, "title": task.title, "status": task.status}
+        data["tasks"].append(new_task)
+        data["last_id"] = new_id
+        self._save_data(data)
+        return new_task
+
+    def update_task(self, task_id: int, task: TaskUpdate) -> Dict:
+        """Обновление задачи по ID"""
+        data = self._load_data()
+        for t in data["tasks"]:
+            if t["id"] == task_id:
+                t.update(task.dict())
+                self._save_data(data)
+                return t
+        raise ValueError(f"Task {task_id} not found")
+
+    def delete_task(self, task_id: int) -> Dict:
+        """Удаление задачи по ID"""
+        data = self._load_data()
+        for idx, t in enumerate(data["tasks"]):
+            if t["id"] == task_id:
+                deleted = data["tasks"].pop(idx)
+                self._save_data(data)
+                return deleted
+        raise ValueError(f"Task {task_id} not found")
 
 
-# Модели Pydantic
-class TaskCreate(BaseModel):
-    title: str
-    status: str = "pending"
-
-
-class TaskUpdate(BaseModel):
-    title: Optional[str] = None
-    status: Optional[str] = None
-
-
-# Эндпоинты
+# --- Инициализация приложения --- #
 app = FastAPI()
 
+# Выбор хранилища при старте приложения
 
+
+# Для использования JSONBin:
+# storage = JsonBinStorage(
+#     bin_url="https://api.jsonbin.io/v3/b/67a10e4aad19ca34f8f93eb7",
+#     api_key="$2a$10$CKC/md8VxneemAk5v1bVMen/t66AErG0wE/4CJqMWzg9uFIXgnvrK",
+# )
+
+# Для использования файлового хранилища
+storage = FileStorage(file_path="tasks.json")
+
+
+# --- Эндпоинты --- #
 @app.get("/tasks", response_model=List[Dict])
-def get_tasks():
-    """Получение списка всех задач"""
-    return storage.get_all_tasks()
+def get_all_tasks():
+    try:
+        return storage.get_all_tasks()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
-@app.post("/tasks", response_model=Dict)
+@app.post("/tasks", response_model=Dict, status_code=status.HTTP_201_CREATED)
 def create_task(task: TaskCreate):
-    """Создание новой задачи"""
-    return storage.create_task(title=task.title, status=task.status)
+    try:
+        return storage.create_task(task)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 @app.put("/tasks/{task_id}", response_model=Dict)
-def update_task(task_id: int, task_update: TaskUpdate):
-    """Обновление задачи по ID"""
+def update_task(task_id: int, task: TaskUpdate):
     try:
-        return storage.update_task(
-            task_id=task_id, title=task_update.title, status=task_update.status
-        )
+        return storage.update_task(task_id, task)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
 
 
 @app.delete("/tasks/{task_id}", response_model=Dict)
 def delete_task(task_id: int):
-    """Удаление задачи по ID"""
     try:
-        deleted_task = storage.delete_task(task_id)
-        return {"message": "Task deleted", "task": deleted_task}
+        deleted = storage.delete_task(task_id)
+        return {"message": "Task deleted", "task": deleted}
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
