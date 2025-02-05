@@ -26,6 +26,12 @@ class TaskUpdate(TaskBaseModel):
     pass
 
 
+class ResponseModel(BaseModel):
+    """Доделать!!!!!!!!"""
+
+    pass
+
+
 class BaseStorage(ABC):
     @abstractmethod
     def get_all_tasks(self) -> List[Dict]:
@@ -101,7 +107,9 @@ class JsonBinStorage(BaseStorage):
                 t.update(task.dict())
                 self._save_data(data)
                 return t
-        raise ValueError(f"Task {task_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found"
+        )
 
     def delete_task(self, task_id: int) -> Dict:
         """Удаление задачи по ID"""
@@ -111,7 +119,9 @@ class JsonBinStorage(BaseStorage):
                 deleted = data["tasks"].pop(idx)
                 self._save_data(data)
                 return deleted
-        raise ValueError(f"Task {task_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found"
+        )
 
 
 # --- Реализация для файлового хранилища --- #
@@ -159,7 +169,9 @@ class FileStorage(BaseStorage):
                 t.update(task.dict())
                 self._save_data(data)
                 return t
-        raise ValueError(f"Task {task_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found"
+        )
 
     def delete_task(self, task_id: int) -> Dict:
         """Удаление задачи по ID"""
@@ -169,7 +181,9 @@ class FileStorage(BaseStorage):
                 deleted = data["tasks"].pop(idx)
                 self._save_data(data)
                 return deleted
-        raise ValueError(f"Task {task_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Task {task_id} not found"
+        )
 
 
 # --- Инициализация приложения --- #
@@ -191,44 +205,20 @@ storage = FileStorage(file_path="tasks.json")
 # --- Эндпоинты --- #
 @app.get("/tasks", response_model=List[Dict])
 def get_all_tasks():
-    try:
-        return storage.get_all_tasks()
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+    return storage.get_all_tasks()
 
 
 @app.post("/tasks", response_model=Dict, status_code=status.HTTP_201_CREATED)
 def create_task(task: TaskCreate):
-    try:
-        return storage.create_task(task)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+    return storage.create_task(task)
 
 
 @app.put("/tasks/{task_id}", response_model=Dict)
 def update_task(task_id: int, task: TaskUpdate):
-    try:
-        return storage.update_task(task_id, task)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+    return storage.update_task(task_id, task)
 
 
 @app.delete("/tasks/{task_id}", response_model=Dict)
 def delete_task(task_id: int):
-    try:
-        deleted = storage.delete_task(task_id)
-        return {"message": "Task deleted", "task": deleted}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+    deleted = storage.delete_task(task_id)
+    return {"message": "Task deleted", "task": deleted}
