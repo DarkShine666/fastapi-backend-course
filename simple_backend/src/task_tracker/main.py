@@ -26,10 +26,15 @@ class TaskUpdate(TaskBaseModel):
     pass
 
 
-class ResponseModel(BaseModel):
-    """Доделать!!!!!!!!"""
+class TaskModel(BaseModel):
+    id: int
+    title: str
+    status: str
 
-    pass
+
+class ResponseModel(BaseModel):
+    message: str
+    task: TaskModel
 
 
 class BaseStorage(ABC):
@@ -203,22 +208,24 @@ storage = FileStorage(file_path="tasks.json")
 
 
 # --- Эндпоинты --- #
-@app.get("/tasks", response_model=List[Dict])
+@app.get("/tasks", response_model=List[TaskModel])
 def get_all_tasks():
     return storage.get_all_tasks()
 
 
-@app.post("/tasks", response_model=Dict, status_code=status.HTTP_201_CREATED)
+@app.post("/tasks", response_model=ResponseModel, status_code=status.HTTP_201_CREATED)
 def create_task(task: TaskCreate):
-    return storage.create_task(task)
+    posted = storage.create_task(task)
+    return {"message": "Task created", "task": posted}
 
 
-@app.put("/tasks/{task_id}", response_model=Dict)
+@app.put("/tasks/{task_id}", response_model=ResponseModel)
 def update_task(task_id: int, task: TaskUpdate):
-    return storage.update_task(task_id, task)
+    putted = storage.update_task(task_id, task)
+    return {"message": "Task update", "task": putted}
 
 
-@app.delete("/tasks/{task_id}", response_model=Dict)
+@app.delete("/tasks/{task_id}", response_model=ResponseModel)
 def delete_task(task_id: int):
     deleted = storage.delete_task(task_id)
     return {"message": "Task deleted", "task": deleted}
